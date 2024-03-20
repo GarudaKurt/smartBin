@@ -1,61 +1,50 @@
+from ultralytics import YOLO #pip install ultralytics
 import cv2
-import numpy as np
+import serial
+import time
+#colab google train ML
+model = YOLO('C:\\workspace\\shs_thesis\\python\\Aldren\\best.pt')
 
-# Function to detect paper or plastic
-def detect_object(image):
-    # Convert image to HSV color space
-    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-    
-    # Define lower and upper boundaries for paper color in HSV
-    lower_paper = np.array([0, 0, 150])
-    upper_paper = np.array([20, 255, 255])
-    
-    # Threshold the HSV image to get only paper color
-    mask_paper = cv2.inRange(hsv, lower_paper, upper_paper)
-    
-    # Find contours in the mask
-    contours, _ = cv2.findContours(mask_paper, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    # Draw bounding box around the detected object // every time I tried to focus the paper object to the border box it will gonna move form 
-    if contours:
-        # Find the largest contour
-        max_contour = max(contours, key=cv2.contourArea)
-        x, y, w, h = cv2.boundingRect(max_contour)
-        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        return "Paper"
-    
-    return "No object detected"
+cap = cv2.VideoCapture(0)
 
-def main():
-    try:
-        # Initialize webcam
-        cap = cv2.VideoCapture(0)
+if not cap.isOpened():
+    print("Error: Unable to open webcam.")
+    exit()
 
-        while True:
-            # Capture frame-by-frame
-            ret, frame = cap.read()
+arduino = serial.Serial('COM5', 9600)
+time.sleep(2)
 
-            if not ret:
-                print("Error: Unable to capture frame.")
-                break
-            
-            # Detect the object
-            object_type = detect_object(frame)
-            cv2.putText(frame, f"Detected object type: {object_type}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            
-            # Display the resulting frame
-            cv2.imshow('frame', frame)
+while True:
+    ret, frame = cap.read()
 
-            # Break the loop when 'q' is pressed
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-        
-        # Release the capture
-        cap.release()
-        cv2.destroyAllWindows()
+    if not ret:
+        print("Error: Unable to capture frame.")
+        break
 
-    except Exception as e:
-        print("An error occurred:", e)
+    results = model(frame)
 
-if __name__ == "__main__":
-    main()
+    for result in results:
+        class_ids = result.boxes.cls
+        class_names = [model.names[int(cls_id)] for cls_id in class_ids]
+
+        for name in class_names:
+            if name == "Plastic":
+                arduino.write(b'plastic\n')
+                print("Plastic detected. Command sent to Arduino: plastic")
+            elif name == "Paper":
+                arduino.write(b'paper\n')
+                print("Paper detected. Command sent to Arduino: paper")
+
+        for box, name in zip(result.boxes.xyxy, class_names):
+            x1, y1, x2, y2 = box
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            cv2.putText(frame, name, (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+
+    cv2.imshow('Object Detection', frame)
+
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+cap.release()
+arduino.close()
+cv2.destroyAllWindows()
